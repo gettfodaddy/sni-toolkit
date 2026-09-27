@@ -7,10 +7,19 @@
 # коробки. mtr/traceroute — по желанию (без них просто пропускается один
 # необязательный пункт отчёта, всё остальное работает).
 #
-# Установить и запустить одной командой (замени URL на свой, см. README):
-#   curl -Ls https://<твой-хостинг>/sni-verify.sh -o /usr/local/bin/sni-verify \
-#     && chmod +x /usr/local/bin/sni-verify
-#   sni-verify -auto
+# Установить и запустить (замени URL на свой хостинг, см. README):
+#
+#   Вариант 1 — сохранить как команду (можно запускать повторно):
+#     curl -Ls https://<твой-хостинг>/sni-verify.sh -o /usr/local/bin/sni-verify \
+#       && chmod +x /usr/local/bin/sni-verify
+#     sni-verify -auto
+#
+#   Вариант 2 — одна строка, без сохранения файла (пайп сразу в bash):
+#     wget -qO- https://censorcheck.tlab.pw | bash
+#     # (или curl -Ls https://censorcheck.tlab.pw | bash)
+#     # Без аргументов автоматически уходит в режим -auto — ничего
+#     # дополнительно указывать не нужно. Передать флаги в этом виде запуска:
+#     #   wget -qO- https://censorcheck.tlab.pw | bash -s -- -f candidates.txt
 #
 # Запускать С ТОГО САМОГО сервера (ноды), для которого подбираешь донора —
 # задержка/маршрут (п.8) важны именно оттуда, а не с локальной машины.
@@ -65,14 +74,18 @@ OUT_CSV=""
 AUTO_MODE=0
 TARGETS=()
 
+# Литерал вместо $0 намеренно — при запуске через "wget -qO- URL | bash"
+# $0 указывает на "bash"/"-bash", а не на осмысленное имя команды.
 usage() {
     echo "Использование:"
-    echo "  $0 <домен>                    — подробный отчёт по одному домену"
-    echo "  $0 -f candidates.txt          — пачка доменов (по одному на строку) -> таблица"
-    echo "  $0 -f candidates.txt -out r.csv  — то же + сохранить в CSV"
-    echo "  $0 -auto                      — сам определит IP/страну этой ноды и"
-    echo "                                   возьмёт стартовый список кандидатов под неё"
-    echo "  $0 -t 15 <домен>              — таймаут сети в секундах (по умолчанию 10)"
+    echo "  sni-verify <домен>                    — подробный отчёт по одному домену"
+    echo "  sni-verify -f candidates.txt          — пачка доменов (по одному на строку) -> таблица"
+    echo "  sni-verify -f candidates.txt -out r.csv  — то же + сохранить в CSV"
+    echo "  sni-verify -auto                      — сам определит IP/страну этой ноды и"
+    echo "                                           возьмёт стартовый список кандидатов под неё"
+    echo "  sni-verify -t 15 <домен>              — таймаут сети в секундах (по умолчанию 10)"
+    echo ""
+    echo "  Без аргументов (в т.ч. при 'wget -qO- ... | bash') — режим -auto по умолчанию."
     exit 1
 }
 
@@ -87,6 +100,17 @@ while [ $# -gt 0 ]; do
     esac
 done
 
+# Совсем без аргументов — в т.ч. типичный случай "wget -qO- URL | bash" без
+# "-s -- ..." — ведём себя как sni-pick: сами уходим в -auto, а не требуем
+# явный флаг. Явный "-f"/домен(ы) в аргументах уважаем как раньше.
+if [ "$AUTO_MODE" = "0" ] && [ -z "$BATCH_FILE" ] && [ ${#TARGETS[@]} -eq 0 ]; then
+    AUTO_MODE=1
+fi
+
+echo -e "${BOLD}${CYAN}┌──────────────────────────────────────────────┐${NC}"
+echo -e "${BOLD}${CYAN}│${NC}  ${BOLD}SNI / Reality Donor Check${NC}  ${CYAN}·${NC} censorcheck.tlab.pw ${BOLD}${CYAN}│${NC}"
+echo -e "${BOLD}${CYAN}└──────────────────────────────────────────────┘${NC}"
+
 if [ -n "$BATCH_FILE" ]; then
     [ -f "$BATCH_FILE" ] || { echo -e "${RED}Файл не найден: $BATCH_FILE${NC}"; exit 1; }
     while IFS= read -r line; do
@@ -95,6 +119,7 @@ if [ -n "$BATCH_FILE" ]; then
     done < "$BATCH_FILE"
 fi
 
+SELF_IP=""; SELF_ASN=""
 if [ "$AUTO_MODE" = "1" ]; then
     echo -e "${CYAN}Определяю IP и страну этой ноды...${NC}"
     SELF_IP=$(curl -s --max-time 6 https://api.ipify.org 2>/dev/null)
@@ -102,12 +127,15 @@ if [ "$AUTO_MODE" = "1" ]; then
     if [ -n "$SELF_IP" ]; then
         # sed вместо jq намеренно — jq далеко не на всех минимальных VPS
         # стоит из коробки, а sed/curl есть всегда. Порядок полей у сервиса
-        # свой, поэтому читаем по имени поля, не по позиции.
-        GEO=$(curl -s --max-time 8 "http://ip-api.com/json/${SELF_IP}?fields=countryCode,country" 2>/dev/null)
+        # свой, поэтому читаем по имени поля, не по позиции. Заодно берём
+        # "as" (ASN+организация) — просто для информативного футера ниже,
+        # на выбор доноров не влияет.
+        GEO=$(curl -s --max-time 8 "http://ip-api.com/json/${SELF_IP}?fields=countryCode,country,as" 2>/dev/null)
         SELF_CC=$(echo "$GEO" | sed -n 's/.*"countryCode":"\([^"]*\)".*/\1/p')
+        SELF_ASN=$(echo "$GEO" | sed -n 's/.*"as":"\([^"]*\)".*/\1/p')
     fi
     [ -z "$SELF_CC" ] && SELF_CC="DEFAULT"
-    [ -n "$SELF_IP" ] && echo -e "  $INFO IP этой ноды: ${BOLD}${SELF_IP}${NC}, страна: ${BOLD}${SELF_CC}${NC}" \
+    [ -n "$SELF_IP" ] && echo -e "  $INFO IP этой ноды: ${BOLD}${SELF_IP}${NC}, страна: ${BOLD}${SELF_CC}${NC}${SELF_ASN:+, ${SELF_ASN}}" \
         || echo -e "  $WARN Не удалось определить IP — беру список DEFAULT"
 
     CANDIDATES="$(country_candidates "$SELF_CC")"
@@ -133,7 +161,8 @@ check_one() {
 
     local TLS13=0 H2=0 PQ=0 REDIRECT_BAD=0 HTTP_CODE="" CDN=""
     local IP="" CERT_ISSUER="" CERT_SAN_OK="?" CERT_BYTES=0
-    local CONNECT_TIME="" RESOLVE_TIME=""
+    local CONNECT_TIME="" APPCONNECT_TIME="" RESOLVE_TIME=""
+    local RESOLVE_MS="" CONNECT_MS="" HANDSHAKE_MS=""
     local VERDICT="ПРОВЕРЬ"
 
     [ "$VERBOSE" = "1" ] && {
@@ -152,13 +181,29 @@ check_one() {
         "https://${DOMAIN}" 2>/dev/null)
     RESOLVE_TIME=$(echo "$CURL_TIMING" | awk '{print $1}')
     CONNECT_TIME=$(echo "$CURL_TIMING" | awk '{print $2}')
+    APPCONNECT_TIME=$(echo "$CURL_TIMING" | awk '{print $3}')
     HTTP_CODE=$(echo "$CURL_TIMING" | awk '{print $4}')
     IP=$(echo "$CURL_TIMING" | awk '{print $5}')
+
+    # ЗАДЕРЖКА: раньше сюда шло %{time_connect} (только TCP-рукопожатие,
+    # БЕЗ TLS) и печаталось как есть, в секундах с 6 знаками после запятой
+    # ("0.002550s") — именно из-за этого цифры выглядели неадекватно
+    # маленькими и "техническими". time_appconnect включает ещё и TLS-
+    # рукопожатие (это и есть реальное время "достучаться и поднять HTTPS"),
+    # а показываем — целыми миллисекундами, как принято у похожих утилит.
+    # appconnect может быть 0, если TLS не поднялся вовсе — тогда откатываемся
+    # на голый TCP-connect, лишь бы не показывать пустоту.
+    local TCP_MS
+    RESOLVE_MS=$(awk -v t="${RESOLVE_TIME:-0}" 'BEGIN{printf "%d", t*1000}')
+    TCP_MS=$(awk -v c="${CONNECT_TIME:-0}" 'BEGIN{printf "%d", c*1000}')
+    HANDSHAKE_MS=$(awk -v c="${CONNECT_TIME:-0}" -v a="${APPCONNECT_TIME:-0}" \
+        'BEGIN{ t = (a+0>0) ? a : c; printf "%d", t*1000 }')
+    CONNECT_MS="$HANDSHAKE_MS"
 
     [ "$VERBOSE" = "1" ] && {
         echo -e "${BOLD}[1/9] DNS + TCP:443 connect${NC}"
         if [ -n "$IP" ] && [ "$IP" != "0.0.0.0" ]; then
-            echo -e "  $OK IP: ${BOLD}${IP}${NC} (DNS: ${RESOLVE_TIME}s, TCP connect: ${CONNECT_TIME}s)"
+            echo -e "  $OK IP: ${BOLD}${IP}${NC} (DNS: ${RESOLVE_MS}ms, TCP: ${TCP_MS}ms, TCP+TLS: ${BOLD}${HANDSHAKE_MS}ms${NC})"
         else
             echo -e "  $FAIL DNS не резолвится, или TCP:443 не отвечает за ${TIMEOUT}с"
             echo -e "       Если ping/mtr до IP проходят нормально, а тут зависает — это НЕ проблема"
@@ -362,39 +407,62 @@ check_one() {
         echo ""
     fi
 
-    SUMMARY_ROWS+=("$DOMAIN|$IP|$TLS13|$H2|$PQ_LABEL|$CDN_LABEL|${CONNECT_TIME}s|$VERDICT")
+    SUMMARY_ROWS+=("$DOMAIN|$IP|$TLS13|$H2|$PQ_LABEL|$CDN_LABEL|${CONNECT_MS}|$VERDICT")
+}
+
+# Рисует/перерисовывает строку прогресса поверх самой себя (\r, без \n) —
+# вызывается перед каждым доменом в батче, создаёт "живой" прогресс-бар.
+render_progress() {
+    local cur="$1" total="$2" label="$3"
+    local width=24
+    local filled=$(( total > 0 ? cur * width / total : width ))
+    [ "$filled" -gt "$width" ] && filled=$width
+    local empty=$(( width - filled ))
+    local bar="" i
+    for ((i = 0; i < filled; i++)); do bar+="█"; done
+    for ((i = 0; i < empty; i++)); do bar+="░"; done
+    local pct=$(( total > 0 ? cur * 100 / total : 100 ))
+    printf "\r  ${CYAN}Сканирую${NC} [%s] %3d%%  (%d/%d)  %-32s" "$bar" "$pct" "$cur" "$total" "$label"
 }
 
 if [ -n "$BATCH_FILE" ] || [ "$AUTO_MODE" = "1" ]; then
-    echo -e "${BOLD}Проверяю ${#TARGETS[@]} доменов...${NC}"
+    TOTAL=${#TARGETS[@]}
+    IDX=0
+    SCAN_START=$SECONDS
     for t in "${TARGETS[@]}"; do
         d=$(normalize_domain "$t")
         [ -z "$d" ] && continue
-        echo -ne "  ${d}...\r"
+        IDX=$((IDX + 1))
+        render_progress "$IDX" "$TOTAL" "$d"
         check_one "$d" "0"
     done
+    printf "\r%-90s\r" " "   # стереть строку прогресса перед таблицей
     echo ""
+
     # Заголовок и yes/no-колонки ниже намеренно на латинице — printf с %-Ns
     # считает ширину в байтах, и кириллица (2 байта/символ) в padded-колонках
     # уезжает и ломает выравнивание таблицы. Только ВЕРДИКТ (последняя,
-    # непадженная колонка) остаётся по-русски.
-    printf "%-32s %-16s %-6s %-4s %-4s %-12s %-8s %s\n" "DOMAIN" "IP" "TLS1.3" "H2" "PQ" "CDN" "CONNECT" "VERDICT"
-    printf '%.0s-' {1..100}; echo ""
+    # непадженная колонка) остаётся по-русски. CONNECT — целые миллисекунды
+    # TCP+TLS-рукопожатия (не секунды с 6 знаками, как раньше).
+    printf "%-32s %-16s %-6s %-4s %-4s %-12s %-9s %s\n" "DOMAIN" "IP" "TLS1.3" "H2" "PQ" "CDN" "CONNECT" "VERDICT"
+    printf '%.0s-' {1..102}; echo ""
+    READY_N=0; CHECK_N=0; BAD_N=0
     for row in "${SUMMARY_ROWS[@]}"; do
         IFS='|' read -r d ip tls13 h2 pq cdn ct verdict <<< "$row"
         tls_s="no"; [ "$tls13" = "1" ] && tls_s="yes"
         h2_s="no"; [ "$h2" = "1" ] && h2_s="yes"
+        ct_disp="-"; [ -n "$ct" ] && [ "$ct" != "-" ] && ct_disp="${ct}ms"
         case "$verdict" in
-            "ГОТОВ") vc="${GREEN}${verdict}${NC}" ;;
-            "ПРОВЕРЬ") vc="${YELLOW}${verdict}${NC}" ;;
-            *) vc="${RED}${verdict}${NC}" ;;
+            ГОТОВ*) vc="${GREEN}${verdict}${NC}"; READY_N=$((READY_N + 1)) ;;
+            ПРОВЕРЬ*) vc="${YELLOW}${verdict}${NC}"; CHECK_N=$((CHECK_N + 1)) ;;
+            *) vc="${RED}${verdict}${NC}"; BAD_N=$((BAD_N + 1)) ;;
         esac
-        printf "%-32s %-16s %-6s %-4s %-4s %-12s %-8s " "$d" "$ip" "$tls_s" "$h2_s" "$pq" "$cdn" "$ct"
+        printf "%-32s %-16s %-6s %-4s %-4s %-12s %-9s " "$d" "$ip" "$tls_s" "$h2_s" "$pq" "$cdn" "$ct_disp"
         echo -e "$vc"
     done
     if [ -n "$OUT_CSV" ]; then
         {
-            echo "domain,ip,tls13,h2,post_quantum,cdn,connect_time_s,verdict"
+            echo "domain,ip,tls13,h2,post_quantum,cdn,connect_ms,verdict"
             for row in "${SUMMARY_ROWS[@]}"; do
                 echo "$row" | tr '|' ','
             done
@@ -402,6 +470,16 @@ if [ -n "$BATCH_FILE" ] || [ "$AUTO_MODE" = "1" ]; then
         echo ""
         echo -e "${INFO} Сохранено в ${BOLD}${OUT_CSV}${NC}"
     fi
+
+    # Итоговая строка счётчиков (ГОТОВ/ПРОВЕРЬ/НЕ ГОДИТСЯ) + время скана —
+    # тот же смысл, что и "OK:N BLOCKED:N PARTIAL:N Total:N" у похожих
+    # утилит, но термины свои: это проверка донора под Reality, а не
+    # проверка блокировок у РФ-провайдеров (для этого отдельный инструмент).
+    SCAN_ELAPSED=$((SECONDS - SCAN_START))
+    echo ""
+    echo -e "  ${GREEN}ГОТОВ:${READY_N}${NC}  ${YELLOW}ПРОВЕРЬ:${CHECK_N}${NC}  ${RED}НЕ ГОДИТСЯ:${BAD_N}${NC}  Всего:${#SUMMARY_ROWS[@]}"
+    [ -n "$SELF_IP" ] && echo -e "  ${INFO} Нода: ${SELF_IP}${SELF_ASN:+, ${SELF_ASN}}"
+    echo -e "  Проверка заняла ${SCAN_ELAPSED}с."
 
     # Быстрая подсказка — лучший по задержке среди ГОТОВ (без mtr/сертификата/
     # CDN, это уже было учтено самим вердиктом). Финалиста всё равно стоит
@@ -411,17 +489,16 @@ if [ -n "$BATCH_FILE" ] || [ "$AUTO_MODE" = "1" ]; then
     for row in "${SUMMARY_ROWS[@]}"; do
         IFS='|' read -r d ip tls13 h2 pq cdn ct verdict <<< "$row"
         [ "$verdict" != "ГОТОВ" ] && continue
-        ct_num="${ct%s}"
-        is_better=$(awk -v a="$ct_num" -v b="$BEST_CT" 'BEGIN{print (a<b)?1:0}' 2>/dev/null)
-        if [ "$is_better" = "1" ]; then BEST_CT="$ct_num"; BEST_ROW="$row"; fi
+        is_better=$(awk -v a="$ct" -v b="$BEST_CT" 'BEGIN{print (a<b)?1:0}' 2>/dev/null)
+        if [ "$is_better" = "1" ]; then BEST_CT="$ct"; BEST_ROW="$row"; fi
     done
     echo ""
     if [ -n "$BEST_ROW" ]; then
         IFS='|' read -r bd bip _ _ _ _ bct _ <<< "$BEST_ROW"
-        echo -e "${GREEN}${BOLD}Лучший по задержке среди ГОТОВ:${NC} ${bd} (${bct}, IP ${bip})"
+        echo -e "${GREEN}${BOLD}Лучший по задержке среди ГОТОВ:${NC} ${bd} (${bct}ms, IP ${bip})"
         echo "  \"dest\": \"${bd}:443\","
         echo "  \"serverNames\": [ \"${bd}\" ]"
-        echo -e "${INFO} Перед вставкой в конфиг прогони полный отчёт: ./sni-verify.sh ${bd}"
+        echo -e "${INFO} Перед вставкой в конфиг прогони полный отчёт: sni-verify ${bd}"
     else
         echo -e "${WARN} Ни один кандидат не дотянул до ГОТОВ — расширь список (-f/-auto другой список) или смотри ПРОВЕРЬ вручную."
     fi
