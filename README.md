@@ -16,22 +16,21 @@
 один пункт отчёта). Список кандидатов по странам встроен прямо в файл, никаких
 дополнительных `.txt` рядом не нужно.
 
-Разместил `sni-verify.sh` у себя (см. варианты хостинга ниже) — на ноде,
-два равноценных способа запустить:
+`sni-verify.sh` уже лежит в твоём репозитории — запускаешь прямо с
+raw-ссылки на GitHub, без стороннего хостинга. Два равноценных способа:
 
 **Вариант 1 — сохранить как команду** (удобно, если будешь гонять повторно):
 
 ```bash
-curl -Ls https://<твой-хостинг>/sni-verify.sh -o /usr/local/bin/sni-verify \
-  && chmod +x /usr/local/bin/sni-verify
+curl -Ls https://raw.githubusercontent.com/gettfodaddy/sni-toolkit/<ветка>/sni-verify.sh \
+  -o /usr/local/bin/sni-verify && chmod +x /usr/local/bin/sni-verify
 sni-verify -auto
 ```
 
-**Вариант 2 — одна строка, без сохранения файла на диск** (пайп сразу в bash,
-как у manual32):
+**Вариант 2 — одна строка, без сохранения файла на диск** (пайп сразу в bash):
 
 ```bash
-wget -qO- https://censorcheck.tlab.pw | bash
+wget -qO- https://raw.githubusercontent.com/gettfodaddy/sni-toolkit/<ветка>/sni-verify.sh | bash
 ```
 
 Без аргументов скрипт сам уходит в режим `-auto` — ровно то же самое, что
@@ -39,16 +38,19 @@ wget -qO- https://censorcheck.tlab.pw | bash
 флаги в этом виде запуска можно через `bash -s --`:
 
 ```bash
-wget -qO- https://censorcheck.tlab.pw | bash -s -- -f candidates.txt -out result.csv
+wget -qO- https://raw.githubusercontent.com/gettfodaddy/sni-toolkit/<ветка>/sni-verify.sh \
+  | bash -s -- -f candidates.txt -out result.csv
 ```
 
 Оба варианта делают одно и то же: сам определит IP/страну ноды, прогонит
 стартовых кандидатов и выдаст таблицу (с живым прогресс-баром по ходу
 сканирования) с лучшим по задержке, вместе с готовым `dest`/`serverNames`
-для вставки в конфиг. `censorcheck.tlab.pw` — просто пример имени хостинга
-для варианта 2, замени на свой домен/поддомен, где реально лежит файл (см.
-варианты хостинга ниже — годится любой из них, в том числе raw-ссылка с
-GitHub, для пайпа это не важно).
+для вставки в конфиг.
+
+`<ветка>` — имя ветки репозитория (обычно `main` или `master`). Проще всего
+не гадать: открой `sni-verify.sh` на странице репозитория на GitHub, нажми
+кнопку **Raw** — в адресной строке будет готовая ссылка с правильной веткой,
+её и используй в командах выше.
 
 ### Где разместить сам файл, чтобы curl работал
 

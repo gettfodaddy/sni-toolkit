@@ -7,19 +7,24 @@
 # коробки. mtr/traceroute — по желанию (без них просто пропускается один
 # необязательный пункт отчёта, всё остальное работает).
 #
-# Установить и запустить (замени URL на свой хостинг, см. README):
+# Установить и запустить — прямо с raw-ссылки СВОЕГО репозитория на GitHub
+# (github.com/gettfodaddy/sni-toolkit), без стороннего хостинга/доменов:
 #
 #   Вариант 1 — сохранить как команду (можно запускать повторно):
-#     curl -Ls https://<твой-хостинг>/sni-verify.sh -o /usr/local/bin/sni-verify \
-#       && chmod +x /usr/local/bin/sni-verify
+#     curl -Ls https://raw.githubusercontent.com/gettfodaddy/sni-toolkit/<ветка>/sni-verify.sh \
+#       -o /usr/local/bin/sni-verify && chmod +x /usr/local/bin/sni-verify
 #     sni-verify -auto
 #
 #   Вариант 2 — одна строка, без сохранения файла (пайп сразу в bash):
-#     wget -qO- https://censorcheck.tlab.pw | bash
-#     # (или curl -Ls https://censorcheck.tlab.pw | bash)
+#     wget -qO- https://raw.githubusercontent.com/gettfodaddy/sni-toolkit/<ветка>/sni-verify.sh | bash
+#     # (или curl -Ls .../sni-verify.sh | bash)
 #     # Без аргументов автоматически уходит в режим -auto — ничего
 #     # дополнительно указывать не нужно. Передать флаги в этом виде запуска:
-#     #   wget -qO- https://censorcheck.tlab.pw | bash -s -- -f candidates.txt
+#     #   wget -qO- .../sni-verify.sh | bash -s -- -f candidates.txt
+#
+#   <ветка> — имя ветки репозитория (обычно main или master); точную
+#   raw-ссылку проще всего взять кнопкой "Raw" на странице sni-verify.sh
+#   в самом GitHub — она уже содержит правильную ветку.
 #
 # Запускать С ТОГО САМОГО сервера (ноды), для которого подбираешь донора —
 # задержка/маршрут (п.8) важны именно оттуда, а не с локальной машины.
@@ -107,9 +112,13 @@ if [ "$AUTO_MODE" = "0" ] && [ -z "$BATCH_FILE" ] && [ ${#TARGETS[@]} -eq 0 ]; t
     AUTO_MODE=1
 fi
 
-echo -e "${BOLD}${CYAN}┌──────────────────────────────────────────────┐${NC}"
-echo -e "${BOLD}${CYAN}│${NC}  ${BOLD}SNI / Reality Donor Check${NC}  ${CYAN}·${NC} censorcheck.tlab.pw ${BOLD}${CYAN}│${NC}"
-echo -e "${BOLD}${CYAN}└──────────────────────────────────────────────┘${NC}"
+# Ширина рамки считается по видимому (ASCII) тексту, без ANSI-кодов, поэтому
+# можно спокойно подставить своё имя репозитория — рамка не съедет.
+BANNER_TXT="SNI / Reality Donor Check - gettfodaddy/sni-toolkit"
+BANNER_W=$(( ${#BANNER_TXT} + 2 ))
+printf "${BOLD}${CYAN}┌"; printf '%.0s─' $(seq 1 "$BANNER_W"); printf "┐${NC}\n"
+printf "${BOLD}${CYAN}│${NC} ${BOLD}%s${NC} ${BOLD}${CYAN}│${NC}\n" "$BANNER_TXT"
+printf "${BOLD}${CYAN}└"; printf '%.0s─' $(seq 1 "$BANNER_W"); printf "┘${NC}\n"
 
 if [ -n "$BATCH_FILE" ]; then
     [ -f "$BATCH_FILE" ] || { echo -e "${RED}Файл не найден: $BATCH_FILE${NC}"; exit 1; }
